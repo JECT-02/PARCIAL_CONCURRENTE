@@ -21,8 +21,10 @@ echo "INFO: Puertos limpiados."
 
 # --- Compilar y Ejecutar --- 
 
-echo "INFO: Compilando el Servidor Central..."
-javac -d src/central_server/ src/central_server/src/main/java/com/example/distributedsystem/CentralServer.java
+mkdir -p out
+
+echo "INFO: Compilando el Servidor Central y los Clientes Java..."
+javac -d out src/central_server/src/main/java/com/example/distributedsystem/CentralServer.java src/clients/java/com/example/distributedsystem/ClienteBanco.java src/clients/java/com/example/distributedsystem/ClienteChat.java
 
 if [ $? -ne 0 ]; then
     echo "ERROR: La compilación de Java falló. Abortando."
@@ -30,7 +32,7 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "INFO: Iniciando el Servidor Central en el puerto 8080..."
-java -cp src/central_server/ com.example.distributedsystem.CentralServer &
+java -cp out com.example.distributedsystem.CentralServer &
 
 # Darle un momento al servidor para que inicie
 sleep 2
@@ -46,4 +48,4 @@ echo "
 SUCCESS: El sistema distribuido ha sido iniciado."
 echo "- Servidor Central en el puerto 8080."
 echo "- Nodos Trabajadores en los puertos 9091, 9092, 9093."
-echo "Puedes interactuar con el sistema usando los clientes."
+echo "Puedes interactuar con el sistema usando los nuevos scripts: run_banco.sh y run_chat.sh"

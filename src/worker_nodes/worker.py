@@ -8,9 +8,8 @@ import logging
 # --- Configuración de Logging ---
 
 def setup_logging(node_id):
-    log_dir = '../../logs'
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
+    log_dir = 'logs'
+    os.makedirs(log_dir, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - [NODO %(node_id)s] - %(message)s',
@@ -72,8 +71,11 @@ def handle_query(query_parts, node_data_dir):
         _, linea, err = find_line_and_index(lines, id_cuenta)
         if err: logging.error(err); return f"ERROR|{err}"
 
-        logging.info(f"Cuenta {id_cuenta} encontrada. Saldo: {linea.split(',')[2]}")
-        return f"SUCCESS|{linea.split(',')[2]}"
+        campos = linea.split(',')
+        # Devolver id_cliente, saldo, fecha_apertura
+        datos_cuenta = ",".join([campos[1], campos[2], campos[3]])
+        logging.info(f"Cuenta {id_cuenta} encontrada. Datos: {datos_cuenta}")
+        return f"SUCCESS|{datos_cuenta}"
 
     elif query_type == "TRANSFERIR_CUENTA":
         if len(params) != 3: return "ERROR|Parámetros incorrectos"
@@ -204,7 +206,7 @@ class WorkerServer:
         self.host = host
         self.port = port
         self.node_id = node_id
-        self.node_data_dir = os.path.join('../../data', f"nodo{node_id}")
+        self.node_data_dir = os.path.join('data', f"nodo{node_id}")
         if not os.path.exists(self.node_data_dir):
             raise FileNotFoundError(f"El directorio de datos {self.node_data_dir} no existe.")
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

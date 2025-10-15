@@ -8,7 +8,7 @@ NUM_PRESTAMOS = 5000
 NUM_TRANSACCIONES = 20000
 NUM_PARTICIONES = 3
 NUM_NODOS = 3
-DATA_DIR = '../../data'
+DATA_DIR = 'data'
 
 def generar_datos():
     # Limpiar y crear directorio de datos principal
