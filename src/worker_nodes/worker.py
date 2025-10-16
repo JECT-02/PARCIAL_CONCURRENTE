@@ -257,7 +257,6 @@ def handle_query(query_parts, node_data_dir):
                     nuevo_saldo_cuenta = (nuevo_saldo_cuenta + vuelto).quantize(TWO_PLACES)
                     campos_prestamo[4] = 'Cancelado'
                     response = f"SUCCESS|Deuda del préstamo {id_prestamo} saldada. Se devolvió {vuelto:.2f} a su cuenta."
-                    log_history(id_cuenta, "DEVOLUCION", f"Vuelto por sobrepago P:{id_prestamo} M:{vuelto}", nuevo_saldo_cuenta, node_data_dir)
                 else:
                     nuevo_monto_pagado = (monto_ya_pagado + monto_pago).quantize(TWO_PLACES)
                     deuda_actualizada = (deuda_restante - monto_pago).quantize(TWO_PLACES)

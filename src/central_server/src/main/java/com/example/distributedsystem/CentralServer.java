@@ -83,21 +83,29 @@ public class CentralServer {
     }
 
     private static String handlePagarDeuda(String[] queryParts) {
-        // Formato esperado: QUERY|clientId|PAGAR_DEUDA|id_prestamo|monto
-        if (queryParts.length != 5) {
+        String idCuentaPago;
+        String idPrestamo;
+        String monto;
+
+        if (queryParts.length == 6) { // Admin client: QUERY|privilegiado|PAGAR_DEUDA|id_cuenta|id_prestamo|monto
+            idCuentaPago = queryParts[3];
+            idPrestamo = queryParts[4];
+            monto = queryParts[5];
+        } else if (queryParts.length == 5) { // Chat client: QUERY|clientId|PAGAR_DEUDA|id_prestamo|monto
+            idCuentaPago = queryParts[1]; // Use the logged-in client's ID
+            idPrestamo = queryParts[3];
+            monto = queryParts[4];
+        } else {
             return "RESPONSE|ERROR|Parámetros incorrectos para PAGAR_DEUDA";
         }
-        try {
-            String clientId = queryParts[1];
-            String idPrestamo = queryParts[3];
-            String monto = queryParts[4];
 
-            // El worker necesita el clientId para validar la pertenencia del préstamo
-            String workerCommand = "PAGAR_DEUDA|" + clientId + "|" + idPrestamo + "|" + monto;
+        try {
+            // El worker necesita el idCuentaPago para validar la pertenencia del préstamo y debitar
+            String workerCommand = "PAGAR_DEUDA|" + idCuentaPago + "|" + idPrestamo + "|" + monto;
             String workerRequest = "EXECUTE|" + UUID.randomUUID().toString().substring(0, 8) + "|" + workerCommand;
 
-            // La lógica de pago se ejecuta en el nodo primario de la cuenta del cliente
-            int accountId = Integer.parseInt(clientId);
+            // La lógica de pago se ejecuta en el nodo primario de la cuenta del cliente que paga
+            int accountId = Integer.parseInt(idCuentaPago);
             int partitionId = (accountId % NUM_PARTITIONS) + 1;
             String primaryNode = partitionTopology.get(partitionId).get(0);
 

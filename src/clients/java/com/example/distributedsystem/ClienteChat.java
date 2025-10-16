@@ -126,11 +126,6 @@ public class ClienteChat extends JFrame {
             tableScrollPane.setVisible(false);
 
             String[] parts = text.split("\\s+");
-            System.out.println("--- DEBUG START ---");
-            System.out.println("Input Text: '" + text + "'");
-            System.out.println("Command Parts: " + Arrays.toString(parts));
-            System.out.println("Parts Length: " + parts.length);
-            System.out.println("--- DEBUG END ---");
             String command = parts[0];
             String finalCommandPayload;
 
