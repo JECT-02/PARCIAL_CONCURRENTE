@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.util.Arrays;
 
 public class ClienteChat extends JFrame {
     private static final String SERVER_ADDRESS = "localhost";
@@ -125,6 +126,11 @@ public class ClienteChat extends JFrame {
             tableScrollPane.setVisible(false);
 
             String[] parts = text.split("\\s+");
+            System.out.println("--- DEBUG START ---");
+            System.out.println("Input Text: '" + text + "'");
+            System.out.println("Command Parts: " + Arrays.toString(parts));
+            System.out.println("Parts Length: " + parts.length);
+            System.out.println("--- DEBUG END ---");
             String command = parts[0];
             String finalCommandPayload;
 
@@ -143,7 +149,8 @@ public class ClienteChat extends JFrame {
                 finalCommandPayload = String.format("CONSULTAR_HISTORIAL|%s", clientId);
             } else if (command.equalsIgnoreCase("PAGAR_DEUDA") && parts.length == 3) {
                 // Usuario escribe: PAGAR_DEUDA <id_prestamo> <monto>
-                finalCommandPayload = String.format("PAGAR_DEUDA|%s|%s|%s", clientId, parts[1], parts[2]);
+                // El servidor central infiere el id de cliente del request principal
+                finalCommandPayload = String.format("PAGAR_DEUDA|%s|%s", parts[1], parts[2]);
             } else {
                 messageArea.append("ERROR: Comando o formato incorrecto. Consulta el panel de ayuda.\n");
                 textField.setText("");
@@ -163,26 +170,31 @@ public class ClienteChat extends JFrame {
             try {
                 String serverMessage;
                 while ((serverMessage = in.readLine()) != null) {
-                    if (serverMessage.startsWith("TABLE_DATA|")) {
-                        String[] parts = serverMessage.split("\\|");
-                        String[] columns = parts[1].split(",");
-                        
-                        tableModel.setRowCount(0);
-                        tableModel.setColumnIdentifiers(columns);
+                    final String finalMessage = serverMessage;
+                    SwingUtilities.invokeLater(() -> {
+                        tableScrollPane.setVisible(false); // Ocultar tabla por defecto
 
-                        for (int i = 2; i < parts.length; i++) {
-                            // El servidor ahora nos garantiza que cada parte es una fila
-                            // y que las columnas vienen separadas por comas
-                            tableModel.addRow(parts[i].split(","));
+                        if (finalMessage.startsWith("TABLE_DATA|")) {
+                            messageArea.append("Sistema: Mostrando tabla con resultados.\n");
+                            String[] tableParts = finalMessage.split("\\|");
+                            String[] columns = tableParts[1].split(",");
+                            tableModel.setRowCount(0);
+                            tableModel.setColumnIdentifiers(columns);
+                            for (int i = 2; i < tableParts.length; i++) {
+                                tableModel.addRow(tableParts[i].split(","));
+                            }
+                            tableScrollPane.setVisible(true);
+                        } else if (finalMessage.startsWith("RESPONSE|SUCCESS|")) {
+                            messageArea.append("Sistema: " + finalMessage.substring("RESPONSE|SUCCESS|".length()) + "\n");
+                        } else if (finalMessage.startsWith("RESPONSE|ERROR|")) {
+                            messageArea.append("ERROR: " + finalMessage.substring("RESPONSE|ERROR|".length()) + "\n");
+                        } else {
+                            messageArea.append(finalMessage + "\n"); // Fallback
                         }
-                        tableScrollPane.setVisible(true);
-                    } else {
-                        // Mensaje de texto normal
-                        messageArea.append(serverMessage + "\n");
-                    }
+                    });
                 }
             } catch (IOException e) {
-                messageArea.append("--- Conexión perdida con el servidor ---\n");
+                SwingUtilities.invokeLater(() -> messageArea.append("--- Conexión perdida con el servidor ---\n"));
             } finally {
                 try {
                     if (socket != null) socket.close();

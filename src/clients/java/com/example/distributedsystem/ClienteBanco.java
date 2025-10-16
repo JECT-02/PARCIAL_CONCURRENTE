@@ -54,6 +54,13 @@ public class ClienteBanco {
                     }
                     consultarHistorial(args[1]);
                     break;
+                case "PAGAR_DEUDA":
+                    if (args.length != 4) {
+                        printUsage();
+                        return;
+                    }
+                    pagarDeuda(args[1], args[2], args[3]);
+                    break;
                 default:
                     System.out.println("Comando no reconocido.");
                     printUsage();
@@ -81,6 +88,11 @@ public class ClienteBanco {
 
     private static void transferirCuenta(String idOrigen, String idDestino, String monto) {
         String query = String.format("TRANSFERIR_CUENTA|%s|%s|%s", idOrigen, idDestino, monto);
+        executeRequest(query);
+    }
+
+    private static void pagarDeuda(String idCuenta, String idPrestamo, String monto) {
+        String query = String.format("PAGAR_DEUDA|%s|%s|%s", idCuenta, idPrestamo, monto);
         executeRequest(query);
     }
     
@@ -169,6 +181,7 @@ public class ClienteBanco {
         System.out.println("  CONSULTAR_CUENTA <id_cuenta>");
         System.out.println("  ESTADO_PAGO_PRESTAMO <id_cuenta>");
         System.out.println("  CONSULTAR_HISTORIAL <id_cuenta>");
+        System.out.println("  PAGAR_DEUDA <id_cuenta> <id_prestamo> <monto>");
         System.out.println("  TRANSFERIR_CUENTA <id_origen> <id_destino> <monto>");
     }
 }

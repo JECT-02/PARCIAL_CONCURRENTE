@@ -9,9 +9,9 @@ from decimal import Decimal, getcontext
 
 # --- Configuración de Precisión Decimal ---
 getcontext().prec = 12 # Precisión suficiente para cálculos financieros
+TWO_PLACES = Decimal('0.01')
 
 # --- Configuración de Logging ---
-
 def setup_logging(node_id):
     log_dir = 'logs'
     os.makedirs(log_dir, exist_ok=True)
@@ -32,7 +32,6 @@ def setup_logging(node_id):
     logging.setLogRecordFactory(record_factory)
 
 # --- Lógica de Sincronización y Archivos ---
-
 FILE_LOCK = threading.RLock()
 
 def get_current_balance(id_cuenta, node_data_dir):
@@ -43,7 +42,7 @@ def get_current_balance(id_cuenta, node_data_dir):
     _, linea, err = find_line_and_index(lines, id_cuenta)
     if err: return None
     try:
-        return Decimal(linea.split(',')[2])
+        return Decimal(linea.split(',')[2]).quantize(TWO_PLACES)
     except (IndexError, ValueError):
         return None
 
@@ -85,7 +84,7 @@ def find_line_and_index(lines, item_id):
 
 def handle_atomic_transfer(params, node_data_dir, file_path):
     id_origen, id_destino, monto_str = params
-    monto = Decimal(monto_str)
+    monto = Decimal(monto_str).quantize(TWO_PLACES)
 
     with FILE_LOCK:
         lines, err = read_all_lines(file_path)
@@ -98,21 +97,21 @@ def handle_atomic_transfer(params, node_data_dir, file_path):
         if err: return f"ERROR|Cuenta de destino {id_destino} no encontrada"
 
         campos_origen = linea_origen.split(',')
-        saldo_origen = Decimal(campos_origen[2])
+        saldo_origen = Decimal(campos_origen[2]).quantize(TWO_PLACES)
         if saldo_origen < monto:
             log_history(id_origen, "TRANSFERIR_CUENTA", f"A:{id_destino} M:{monto}", saldo_origen, node_data_dir)
             return "ERROR|Fondos insuficientes"
         
         campos_destino = linea_destino.split(',')
-        saldo_destino = Decimal(campos_destino[2])
+        saldo_destino = Decimal(campos_destino[2]).quantize(TWO_PLACES)
 
-        nuevo_saldo_origen = saldo_origen - monto
-        nuevo_saldo_destino = saldo_destino + monto
+        nuevo_saldo_origen = (saldo_origen - monto).quantize(TWO_PLACES)
+        nuevo_saldo_destino = (saldo_destino + monto).quantize(TWO_PLACES)
 
-        campos_origen[2] = str(nuevo_saldo_origen)
+        campos_origen[2] = f"{nuevo_saldo_origen:.2f}"
         lines[idx_origen] = ",".join(campos_origen) + '\n'
 
-        campos_destino[2] = str(nuevo_saldo_destino)
+        campos_destino[2] = f"{nuevo_saldo_destino:.2f}"
         lines[idx_destino] = ",".join(campos_destino) + '\n'
         
         write_all_lines(file_path, lines)
@@ -122,7 +121,6 @@ def handle_atomic_transfer(params, node_data_dir, file_path):
     return "SUCCESS|Transferencia completada"
 
 # --- Lógica de Queries ---
-
 def handle_query(query_parts, node_data_dir):
     query_type = query_parts[0]
     params = query_parts[1:]
@@ -139,13 +137,14 @@ def handle_query(query_parts, node_data_dir):
             _, linea, err = find_line_and_index(lines, id_cuenta)
             if err: return f"ERROR|{err}"
             campos = linea.split(',')
-            log_history(id_cuenta, query_type, "", Decimal(campos[2]), node_data_dir)
-            datos_cuenta = ",".join([campos[0], campos[1], campos[2], campos[3]])
+            saldo_actual = Decimal(campos[2]).quantize(TWO_PLACES)
+            log_history(id_cuenta, query_type, "", saldo_actual, node_data_dir)
+            datos_cuenta = ",".join([campos[0], campos[1], f"{saldo_actual:.2f}", campos[3]])
             return f"SUCCESS|TABLE_DATA|ID Cuenta,ID Cliente,Saldo,Fecha Apertura|{datos_cuenta}"
 
         elif query_type == "TRANSFERIR_CUENTA":
             if len(params) != 3: return "ERROR|Parámetros incorrectos"
-            id_origen, id_destino, _ = params
+            id_origen, id_destino, monto_str = params
             if id_origen == id_destino: return "ERROR|Cuentas de origen y destino no pueden ser la misma."
             part_origen_idx = (int(id_origen) - 1) % 3 + 1
             file_origen = os.path.join(node_data_dir, f"cuentas_part{part_origen_idx}.txt")
@@ -158,7 +157,7 @@ def handle_query(query_parts, node_data_dir):
             if len(params) < 2: return "ERROR|Parámetros incorrectos para DEBIT"
             id_cuenta, monto_str = params[0], params[1]
             description = params[2] if len(params) > 2 else "DEBIT"
-            monto = Decimal(monto_str)
+            monto = Decimal(monto_str).quantize(TWO_PLACES)
             with FILE_LOCK:
                 part_index = (int(id_cuenta) - 1) % 3 + 1
                 file_path = os.path.join(node_data_dir, f"cuentas_part{part_index}.txt")
@@ -167,22 +166,22 @@ def handle_query(query_parts, node_data_dir):
                 idx, linea, err = find_line_and_index(lines, id_cuenta)
                 if err: return f"ERROR|Cuenta {id_cuenta} no encontrada"
                 campos = linea.split(',')
-                saldo = Decimal(campos[2])
+                saldo = Decimal(campos[2]).quantize(TWO_PLACES)
                 if saldo < monto: 
                     log_history(id_cuenta, description, f"M:{monto}", saldo, node_data_dir)
                     return "ERROR|Fondos insuficientes"
-                nuevo_saldo = saldo - monto
-                campos[2] = str(nuevo_saldo)
+                nuevo_saldo = (saldo - monto).quantize(TWO_PLACES)
+                campos[2] = f"{nuevo_saldo:.2f}"
                 lines[idx] = ",".join(campos) + '\n'
                 write_all_lines(file_path, lines)
                 log_history(id_cuenta, description, f"M:{monto}", nuevo_saldo, node_data_dir)
-                return f"SUCCESS|Débito de {monto} completado"
+                return f"SUCCESS|Débito de {monto:.2f} completado"
 
         elif query_type == "CREDIT":
             if len(params) < 2: return "ERROR|Parámetros incorrectos para CREDIT"
             id_cuenta, monto_str = params[0], params[1]
             description = params[2] if len(params) > 2 else "CREDIT"
-            monto = Decimal(monto_str)
+            monto = Decimal(monto_str).quantize(TWO_PLACES)
             with FILE_LOCK:
                 part_index = (int(id_cuenta) - 1) % 3 + 1
                 file_path = os.path.join(node_data_dir, f"cuentas_part{part_index}.txt")
@@ -191,18 +190,20 @@ def handle_query(query_parts, node_data_dir):
                 idx, linea, err = find_line_and_index(lines, id_cuenta)
                 if err: return f"ERROR|Cuenta {id_cuenta} no encontrada"
                 campos = linea.split(',')
-                saldo_actual = Decimal(campos[2])
-                nuevo_saldo = saldo_actual + monto
-                campos[2] = str(nuevo_saldo)
+                saldo_actual = Decimal(campos[2]).quantize(TWO_PLACES)
+                nuevo_saldo = (saldo_actual + monto).quantize(TWO_PLACES)
+                campos[2] = f"{nuevo_saldo:.2f}"
                 lines[idx] = ",".join(campos) + '\n'
                 write_all_lines(file_path, lines)
                 log_history(id_cuenta, description, f"M:{monto}", nuevo_saldo, node_data_dir)
-                return f"SUCCESS|Crédito de {monto} completado"
+                return f"SUCCESS|Crédito de {monto:.2f} completado"
 
         elif query_type == "PAGAR_DEUDA":
             if len(params) != 3: return "ERROR|Parámetros incorrectos para PAGAR_DEUDA"
             id_cuenta, id_prestamo, monto_pago_str = params
-            monto_pago = Decimal(monto_pago_str)
+            monto_pago = Decimal(monto_pago_str).quantize(TWO_PLACES)
+            if monto_pago <= 0:
+                return "ERROR|El monto a pagar debe ser positivo."
             id_cliente_str = f"cliente_{id_cuenta}"
             with FILE_LOCK:
                 prestamo_encontrado = False
@@ -222,42 +223,52 @@ def handle_query(query_parts, node_data_dir):
                 if not prestamo_encontrado: return "ERROR|El préstamo no existe o no le pertenece."
                 
                 campos_prestamo = linea_prestamo.split(',')
-                deuda_restante = Decimal(campos_prestamo[2]) - Decimal(campos_prestamo[3])
+                monto_total_prestamo = Decimal(campos_prestamo[2]).quantize(TWO_PLACES)
+                monto_ya_pagado = Decimal(campos_prestamo[3]).quantize(TWO_PLACES)
+                deuda_restante = (monto_total_prestamo - monto_ya_pagado).quantize(TWO_PLACES)
                 fecha_limite = datetime.datetime.strptime(campos_prestamo[5], '%Y-%m-%d').date()
                 
-                if campos_prestamo[4] == 'Cancelado':
+                if deuda_restante <= 0:
                     return "SUCCESS|Esta deuda ya ha sido cancelada."
-                if fecha_limite < datetime.date(2025, 10, 15):
+                if fecha_limite < datetime.date.today():
                     log_history(id_cuenta, query_type, f"P:{id_prestamo} M:{monto_pago}", get_current_balance(id_cuenta, node_data_dir), node_data_dir)
                     return "ERROR|Su deuda está vencida. Por favor, contacte al banco para recibir ayuda."
-                if monto_pago > deuda_restante:
-                    log_history(id_cuenta, query_type, f"P:{id_prestamo} M:{monto_pago}", get_current_balance(id_cuenta, node_data_dir), node_data_dir)
-                    return f"ERROR|El monto {monto_pago} es mayor a su deuda de {deuda_restante}"
                 
                 saldo_cuenta = get_current_balance(id_cuenta, node_data_dir)
-                if saldo_cuenta is None or saldo_cuenta < monto_pago: 
+                if saldo_cuenta is None:
+                    return "ERROR|No se pudo obtener el saldo de la cuenta."
+                saldo_cuenta = saldo_cuenta.quantize(TWO_PLACES)
+                if saldo_cuenta < monto_pago:
                     log_history(id_cuenta, query_type, f"P:{id_prestamo} M:{monto_pago}", saldo_cuenta, node_data_dir)
-                    return "ERROR|Fondos insuficientes"
+                    return f"ERROR|Fondos insuficientes. Necesita {monto_pago:.2f} pero solo tiene {saldo_cuenta:.2f}"
                 
                 part_cuenta_idx = (int(id_cuenta) - 1) % 3 + 1
                 cuentas_file_path = os.path.join(node_data_dir, f"cuentas_part{part_cuenta_idx}.txt")
                 lines_cuentas, _ = read_all_lines(cuentas_file_path)
                 idx_cuenta, _, _ = find_line_and_index(lines_cuentas, id_cuenta)
                 campos_cuenta = lines_cuentas[idx_cuenta].strip().split(',')
-                nuevo_saldo_cuenta = saldo_cuenta - monto_pago
-                campos_cuenta[2] = str(nuevo_saldo_cuenta)
+                
+                nuevo_saldo_cuenta = (saldo_cuenta - monto_pago).quantize(TWO_PLACES)
+                
+                response = ""
+                if monto_pago >= deuda_restante:
+                    vuelto = (monto_pago - deuda_restante).quantize(TWO_PLACES)
+                    nuevo_monto_pagado = monto_total_prestamo
+                    nuevo_saldo_cuenta = (nuevo_saldo_cuenta + vuelto).quantize(TWO_PLACES)
+                    campos_prestamo[4] = 'Cancelado'
+                    response = f"SUCCESS|Deuda del préstamo {id_prestamo} saldada. Se devolvió {vuelto:.2f} a su cuenta."
+                    log_history(id_cuenta, "DEVOLUCION", f"Vuelto por sobrepago P:{id_prestamo} M:{vuelto}", nuevo_saldo_cuenta, node_data_dir)
+                else:
+                    nuevo_monto_pagado = (monto_ya_pagado + monto_pago).quantize(TWO_PLACES)
+                    deuda_actualizada = (deuda_restante - monto_pago).quantize(TWO_PLACES)
+                    response = f"SUCCESS|Pago de {monto_pago:.2f} recibido. Su nueva deuda para el préstamo {id_prestamo} es {deuda_actualizada:.2f}"
+                
+                campos_cuenta[2] = f"{nuevo_saldo_cuenta:.2f}"
                 lines_cuentas[idx_cuenta] = ",".join(campos_cuenta) + '\n'
                 
-                nuevo_monto_pagado = Decimal(campos_prestamo[3]) + monto_pago
-                campos_prestamo[3] = str(nuevo_monto_pagado)
-                
-                if nuevo_monto_pagado >= Decimal(campos_prestamo[2]):
-                    campos_prestamo[4] = 'Cancelado'
-                    response = f"SUCCESS|Deuda del préstamo {id_prestamo} saldada."
-                else:
-                    response = f"SUCCESS|Pago recibido. Su nueva deuda para el préstamo {id_prestamo} es {deuda_restante - monto_pago}"
-                
+                campos_prestamo[3] = f"{nuevo_monto_pagado:.2f}"
                 lines_prestamos[idx_prestamo] = ",".join(campos_prestamo) + '\n'
+                
                 write_all_lines(cuentas_file_path, lines_cuentas)
                 write_all_lines(prestamos_file_path, lines_prestamos)
                 log_history(id_cuenta, query_type, f"P:{id_prestamo} M:{monto_pago}", nuevo_saldo_cuenta, node_data_dir)
@@ -274,8 +285,11 @@ def handle_query(query_parts, node_data_dir):
                 if err or not lines: continue
                 for line in lines:
                     try:
-                        if line.strip().split('|')[1] == id_cuenta:
-                            historial.append(line.strip().replace('|', ','))
+                        parts = line.strip().split('|')
+                        if len(parts) > 2 and parts[1] == id_cuenta:
+                            operacion = parts[2]
+                            if operacion != "DEVOLUCION":
+                                historial.append(line.strip().replace('|', ','))
                     except IndexError:
                         continue # Ignorar líneas malformadas en el historial
             if not historial: return "SUCCESS|No hay historial para esta cuenta."
@@ -288,7 +302,7 @@ def handle_query(query_parts, node_data_dir):
             id_cuenta = params[0]
             id_cliente_str = f"cliente_{id_cuenta}"
             resultados = []
-            today = datetime.date(2025, 10, 15)
+            today = datetime.date.today()
             for i in range(1, 4):
                 file_path = os.path.join(node_data_dir, f"prestamos_part{i}.txt")
                 if not os.path.exists(file_path): continue
@@ -298,17 +312,17 @@ def handle_query(query_parts, node_data_dir):
                     try:
                         campos = line.strip().split(',')
                         if campos[1] == id_cliente_str:
-                            monto_total = Decimal(campos[2])
-                            monto_pagado = Decimal(campos[3])
+                            monto_total = Decimal(campos[2]).quantize(TWO_PLACES)
+                            monto_pagado = Decimal(campos[3]).quantize(TWO_PLACES)
                             fecha_limite_str = campos[5]
                             
-                            monto_pendiente = monto_total - monto_pagado
+                            monto_pendiente = (monto_total - monto_pagado).quantize(TWO_PLACES)
 
                             if monto_pendiente <= 0: estado_actual = "Cancelado"
                             elif datetime.datetime.strptime(fecha_limite_str, '%Y-%m-%d').date() < today: estado_actual = "Vencido"
                             else: estado_actual = "Activo"
                             
-                            linea_formateada = f"{campos[0]},{monto_total},{monto_pagado},{monto_pendiente},{estado_actual},{fecha_limite_str}"
+                            linea_formateada = f"{campos[0]},{monto_total:.2f},{monto_pagado:.2f},{monto_pendiente:.2f},{estado_actual},{fecha_limite_str}"
                             resultados.append(linea_formateada)
                     except (IndexError, ValueError): continue
             if not resultados: 
@@ -320,16 +334,16 @@ def handle_query(query_parts, node_data_dir):
             return response
 
         elif query_type == "ARQUEO_CUENTAS":
-            total_sum = Decimal('0.0')
+            total_sum = Decimal('0.00').quantize(TWO_PLACES)
             for i in range(1, 4):
                 file_path = os.path.join(node_data_dir, f"cuentas_part{i}.txt")
                 if not os.path.exists(file_path): continue
                 lines, err = read_all_lines(file_path)
                 if err or not lines: continue
                 for line in lines:
-                    try: total_sum += Decimal(line.strip().split(',')[2])
+                    try: total_sum = (total_sum + Decimal(line.strip().split(',')[2])).quantize(TWO_PLACES)
                     except (IndexError, ValueError): continue
-            return f"SUCCESS|{total_sum}"
+            return f"SUCCESS|{total_sum:.2f}"
 
         else:
             return f"ERROR|Query '{query_type}' no soportada"
@@ -338,11 +352,6 @@ def handle_query(query_parts, node_data_dir):
         logging.error(f"Error inesperado procesando query '{query_type}': {e}")
         return f"ERROR|Error interno del worker: {e}"
 
-    # Logueo Centralizado
-    if history_account_id and query_type != "CONSULTAR_HISTORIAL":
-        log_history(history_account_id, query_type, details_for_log, response, node_data_dir)
-    
-    return response
 
 # --- Servidor TCP Concurrente ---
 

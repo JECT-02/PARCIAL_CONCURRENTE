@@ -19,7 +19,40 @@ def generar_datos():
     print("Generando datos base...")
     # --- Generar Datos en Memoria ---
     cuentas = [f"{i},{f'cliente_{i}'},{round(random.uniform(0.0, 10000.0), 2)},{(datetime.date(2020, 1, 1) + datetime.timedelta(days=random.randint(0, 1825))).strftime('%Y-%m-%d')}" for i in range(1, NUM_CUENTAS + 1)]
-    prestamos = [f"{i},{f'cliente_{random.randint(1, NUM_CUENTAS)}'},{round(random.uniform(500.0, 20000.0), 2)},{round(random.uniform(0, 5000.0), 2)},{'Activo' if random.random() > 0.5 else 'Cancelado'},{(datetime.date(2024, 1, 1) + datetime.timedelta(days=random.randint(0, 1095))).strftime('%Y-%m-%d')}" for i in range(1, NUM_PRESTAMOS + 1)]
+    prestamos = []
+    today = datetime.date.today()
+    for i in range(1, NUM_PRESTAMOS + 1):
+        cliente_id = f'cliente_{random.randint(1, NUM_CUENTAS)}'
+        monto_total = round(random.uniform(500.0, 20000.0), 2)
+        
+        # Decidir aleatoriamente si el préstamo estará total o parcialmente pagado
+        if random.random() < 0.3: # 30% de probabilidad de que esté cancelado
+            monto_pagado = monto_total
+        else:
+            # Pagar un monto aleatorio, asegurando que no sea el total
+            monto_pagado = round(random.uniform(0, monto_total * 0.9), 2)
+
+        # Generar una fecha límite aleatoria
+        # Asegurar que algunas fechas ya hayan pasado para tener préstamos vencidos
+        if random.random() < 0.3: # 30% de probabilidad de que la fecha haya vencido
+             fecha_limite_dt = datetime.date.today() - datetime.timedelta(days=random.randint(1, 365))
+        else:
+            fecha_limite_dt = datetime.date.today() + datetime.timedelta(days=random.randint(0, 730))
+
+        fecha_limite_str = fecha_limite_dt.strftime('%Y-%m-%d')
+
+        status = ''
+        if monto_total - monto_pagado <= 0.01: # Usar una pequeña tolerancia para punto flotante
+            status = 'Cancelado'
+            monto_pagado = monto_total
+        else:
+            if fecha_limite_dt >= today:
+                status = 'Activo'
+            else:
+                status = 'Vencido'
+        
+        prestamo = f"{i},{cliente_id},{monto_total},{monto_pagado},{status},{fecha_limite_str}"
+        prestamos.append(prestamo)
     transacciones = [f"{i},{random.randint(1, NUM_CUENTAS)},{random.choice(['Deposito', 'Retiro', 'Transferencia'])},{round(random.uniform(10.0, 1000.0), 2)},{(datetime.datetime.now() - datetime.timedelta(days=random.randint(0, 365))).strftime('%Y-%m-%d %H:%M:%S')}" for i in range(1, NUM_TRANSACCIONES + 1)]
 
     tablas = {
