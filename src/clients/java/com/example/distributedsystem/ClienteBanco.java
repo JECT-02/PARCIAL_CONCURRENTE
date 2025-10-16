@@ -26,33 +26,33 @@ public class ClienteBanco {
 
         try {
             switch (command) {
-                case "consulta":
+                case "CONSULTAR_CUENTA":
                     if (args.length != 2) {
                         printUsage();
                         return;
                     }
                     consultarCuenta(args[1]);
                     break;
-                case "transferencia":
+                case "TRANSFERIR_CUENTA":
                     if (args.length != 4) {
                         printUsage();
                         return;
                     }
                     transferirCuenta(args[1], args[2], args[3]);
                     break;
-                case "stress":
-                     if (args.length != 3) {
-                        printUsage();
-                        return;
-                    }
-                    runStressTest(Integer.parseInt(args[1]), Integer.parseInt(args[2]));
-                    break;
-                case "estado_pago_prestamo":
+                case "ESTADO_PAGO_PRESTAMO":
                     if (args.length != 2) {
                         printUsage();
                         return;
                     }
                     consultarPrestamo(args[1]);
+                    break;
+                case "CONSULTAR_HISTORIAL":
+                    if (args.length != 2) {
+                        printUsage();
+                        return;
+                    }
+                    consultarHistorial(args[1]);
                     break;
                 default:
                     System.out.println("Comando no reconocido.");
@@ -71,6 +71,11 @@ public class ClienteBanco {
 
     private static void consultarPrestamo(String idCuenta) {
         String query = String.format("ESTADO_PAGO_PRESTAMO|%s", idCuenta);
+        executeRequest(query);
+    }
+
+    private static void consultarHistorial(String idCuenta) {
+        String query = String.format("CONSULTAR_HISTORIAL|%s", idCuenta);
         executeRequest(query);
     }
 
@@ -118,8 +123,8 @@ public class ClienteBanco {
 
 
     private static void executeRequest(String query) {
-        int txId = txCounter.incrementAndGet();
-        String request = String.format("EXECUTE|%d|%s", txId, query);
+        String clientId = "privilegiado"; // ClienteBanco es un cliente privilegiado
+        String request = String.format("QUERY|%s|%s", clientId, query);
 
         try (
             Socket socket = new Socket(SERVER_ADDRESS, SERVER_PORT);
@@ -127,22 +132,43 @@ public class ClienteBanco {
             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))
         ) {
             out.println(request);
-            System.out.println("Enviado: " + request);
+            // System.out.println("[CLIENTE BANCO] Enviado: " + request); // Suprimir este log
 
             String response = in.readLine();
-            System.out.println("Recibido: " + response);
+            // System.out.println("[CLIENTE BANCO] Recibido: " + response); // Suprimir este log
+
+            // Procesar y mostrar solo la información relevante
+            if (response != null) {
+                if (response.startsWith("TABLE_DATA|")) {
+                    // Imprimir la tabla directamente
+                    String[] parts = response.split("\\|");
+                    String headers = parts[1];
+                    System.out.println(headers.replace(',', '\t')); // Imprimir cabeceras
+                    for (int i = 2; i < parts.length; i++) {
+                        System.out.println(parts[i].replace(',', '\t')); // Imprimir filas
+                    }
+                } else if (response.startsWith("RESPONSE|SUCCESS|")) {
+                    System.out.println(response.substring("RESPONSE|SUCCESS|".length()));
+                } else if (response.startsWith("RESPONSE|ERROR|")) {
+                    System.err.println(response.substring("RESPONSE|ERROR|".length()));
+                } else {
+                    System.out.println(response); // En caso de un formato inesperado
+                }
+            } else {
+                System.err.println("El servidor no devolvió respuesta.");
+            }
 
         } catch (IOException e) {
-            System.err.println("Error de comunicación con el servidor: " + e.getMessage());
+            System.err.println("[CLIENTE BANCO] Error de comunicación con el servidor: " + e.getMessage());
         }
     }
 
     private static void printUsage() {
         System.out.println("Uso: java ClienteBanco <comando> [opciones]");
         System.out.println("Comandos:");
-        System.out.println("  consulta <id_cuenta>");
-        System.out.println("  estado_pago_prestamo <id_cuenta>");
-        System.out.println("  transferencia <id_origen> <id_destino> <monto>");
-        System.out.println("  stress <num_hilos> <num_solicitudes_por_hilo>");
+        System.out.println("  CONSULTAR_CUENTA <id_cuenta>");
+        System.out.println("  ESTADO_PAGO_PRESTAMO <id_cuenta>");
+        System.out.println("  CONSULTAR_HISTORIAL <id_cuenta>");
+        System.out.println("  TRANSFERIR_CUENTA <id_origen> <id_destino> <monto>");
     }
 }
