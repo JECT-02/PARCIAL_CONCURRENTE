@@ -47,7 +47,7 @@ public class ClienteBanco {
                     }
                     runStressTest(Integer.parseInt(args[1]), Integer.parseInt(args[2]));
                     break;
-                case "prestamo":
+                case "estado_pago_prestamo":
                     if (args.length != 2) {
                         printUsage();
                         return;
@@ -141,7 +141,7 @@ public class ClienteBanco {
         System.out.println("Uso: java ClienteBanco <comando> [opciones]");
         System.out.println("Comandos:");
         System.out.println("  consulta <id_cuenta>");
-        System.out.println("  prestamo <id_cuenta>");
+        System.out.println("  estado_pago_prestamo <id_cuenta>");
         System.out.println("  transferencia <id_origen> <id_destino> <monto>");
         System.out.println("  stress <num_hilos> <num_solicitudes_por_hilo>");
     }

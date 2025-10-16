@@ -19,7 +19,7 @@ def generar_datos():
     print("Generando datos base...")
     # --- Generar Datos en Memoria ---
     cuentas = [f"{i},{f'cliente_{i}'},{round(random.uniform(0.0, 10000.0), 2)},{(datetime.date(2020, 1, 1) + datetime.timedelta(days=random.randint(0, 1825))).strftime('%Y-%m-%d')}" for i in range(1, NUM_CUENTAS + 1)]
-    prestamos = [f"{i},{f'cliente_{random.randint(1, NUM_CUENTAS)}'},{round(random.uniform(500.0, 20000.0), 2)},{round(random.uniform(0, 5000.0), 2)},{'Activo' if random.random() > 0.5 else 'Cancelado'},{(datetime.date(2021, 1, 1) + datetime.timedelta(days=random.randint(0, 1095))).strftime('%Y-%m-%d')}" for i in range(1, NUM_PRESTAMOS + 1)]
+    prestamos = [f"{i},{f'cliente_{random.randint(1, NUM_CUENTAS)}'},{round(random.uniform(500.0, 20000.0), 2)},{round(random.uniform(0, 5000.0), 2)},{'Activo' if random.random() > 0.5 else 'Cancelado'},{(datetime.date(2024, 1, 1) + datetime.timedelta(days=random.randint(0, 1095))).strftime('%Y-%m-%d')}" for i in range(1, NUM_PRESTAMOS + 1)]
     transacciones = [f"{i},{random.randint(1, NUM_CUENTAS)},{random.choice(['Deposito', 'Retiro', 'Transferencia'])},{round(random.uniform(10.0, 1000.0), 2)},{(datetime.datetime.now() - datetime.timedelta(days=random.randint(0, 365))).strftime('%Y-%m-%d %H:%M:%S')}" for i in range(1, NUM_TRANSACCIONES + 1)]
 
     tablas = {

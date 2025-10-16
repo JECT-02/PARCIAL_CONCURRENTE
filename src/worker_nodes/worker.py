@@ -35,16 +35,32 @@ def setup_logging(node_id):
 
 FILE_LOCK = threading.RLock()
 
-def log_history(id_cuenta, command, details, node_data_dir, new_balance=None):
+def get_current_balance(id_cuenta, node_data_dir):
     part_index = (int(id_cuenta) - 1) % 3 + 1
-    hist_file = os.path.join(node_data_dir, f"historial_part{part_index}.txt")
-    fecha = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    balance_str = f'{new_balance:.2f}' if new_balance is not None else 'N/A'
-    log_line = f"{id_cuenta},{command},{details},{fecha},{balance_str}\n"
-    # Usamos el mismo lock global para asegurar consistencia
-    with FILE_LOCK:
-        with open(hist_file, 'a', encoding='utf-8') as f:
-            f.write(log_line)
+    file_path = os.path.join(node_data_dir, f"cuentas_part{part_index}.txt")
+    lines, err = read_all_lines(file_path)
+    if err: return None
+    _, linea, err = find_line_and_index(lines, id_cuenta)
+    if err: return None
+    try:
+        return Decimal(linea.split(',')[2])
+    except (IndexError, ValueError):
+        return None
+
+def log_history(id_cuenta, command, details, balance, node_data_dir):
+    try:
+        part_index = (int(id_cuenta) - 1) % 3 + 1
+        hist_file = os.path.join(node_data_dir, f"historial_part{part_index}.txt")
+        fecha = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        balance_str = f'{balance:.2f}' if balance is not None else 'N/A'
+        details_cleaned = str(details).replace('\n', ' ').replace('|', ' ')
+        log_line = f"{fecha}|{id_cuenta}|{command}|{details_cleaned}|{balance_str}\n"
+        
+        with FILE_LOCK:
+            with open(hist_file, 'a', encoding='utf-8') as f:
+                f.write(log_line)
+    except Exception as e:
+        logging.error(f"Fallo al escribir en el historial: {e}")
 
 def read_all_lines(file_path):
     with FILE_LOCK:
@@ -84,6 +100,7 @@ def handle_atomic_transfer(params, node_data_dir, file_path):
         campos_origen = linea_origen.split(',')
         saldo_origen = Decimal(campos_origen[2])
         if saldo_origen < monto:
+            log_history(id_origen, "TRANSFERIR_CUENTA", f"A:{id_destino} M:{monto}", saldo_origen, node_data_dir)
             return "ERROR|Fondos insuficientes"
         
         campos_destino = linea_destino.split(',')
@@ -99,10 +116,9 @@ def handle_atomic_transfer(params, node_data_dir, file_path):
         lines[idx_destino] = ",".join(campos_destino) + '\n'
         
         write_all_lines(file_path, lines)
-        log_history(id_origen, "TRANSFERENCIA_ENVIADA", f"A:{id_destino} M:{monto}", node_data_dir, new_balance=nuevo_saldo_origen)
-        log_history(id_destino, "TRANSFERENCIA_RECIBIDA", f"DE:{id_origen} M:{monto}", node_data_dir, new_balance=nuevo_saldo_destino)
+        log_history(id_origen, "TRANSFERENCIA_ENVIADA", f"A:{id_destino} M:{monto}", nuevo_saldo_origen, node_data_dir)
+        log_history(id_destino, "TRANSFERENCIA_RECIBIDA", f"DE:{id_origen} M:{monto}", nuevo_saldo_destino, node_data_dir)
 
-    logging.info(f"Transferencia atómica completada en {file_path}")
     return "SUCCESS|Transferencia completada"
 
 # --- Lógica de Queries ---
@@ -112,258 +128,217 @@ def handle_query(query_parts, node_data_dir):
     params = query_parts[1:]
     logging.info(f"Procesando query: {query_type} con params: {params}")
 
-    if query_type == "CONSULTAR_CUENTA":
-        if len(params) != 1: return "ERROR|Parámetros incorrectos"
-        id_cuenta = params[0]
-        part_index = (int(id_cuenta) - 1) % 3 + 1
-        file_path = os.path.join(node_data_dir, f"cuentas_part{part_index}.txt")
-        
-        logging.info(f"Consultando cuenta {id_cuenta} en {file_path}")
-        lines, err = read_all_lines(file_path)
-        if err: logging.error(err); return f"ERROR|{err}"
-        
-        _, linea, err = find_line_and_index(lines, id_cuenta)
-        if err: logging.error(err); return f"ERROR|{err}"
-
-        campos = linea.split(',')
-        log_history(id_cuenta, "CONSULTAR_CUENTA", "", node_data_dir, new_balance=Decimal(campos[2]))
-
-        # Devolver id_cuenta, id_cliente, saldo, fecha_apertura
-        datos_cuenta = ",".join([campos[0], campos[1], campos[2], campos[3]])
-        logging.info(f"Cuenta {id_cuenta} encontrada. Datos: {datos_cuenta}")
-        return f"SUCCESS|TABLE_DATA|ID Cuenta,ID Cliente,Saldo,Fecha Apertura|{datos_cuenta}"
-
-    elif query_type == "TRANSFERIR_CUENTA": # Solo para transferencias intra-partición
-        if len(params) != 3: return "ERROR|Parámetros incorrectos"
-        id_origen, id_destino, _ = params
-
-        part_origen_idx = (int(id_origen) - 1) % 3 + 1
-        file_origen = os.path.join(node_data_dir, f"cuentas_part{part_origen_idx}.txt")
-        part_destino_idx = (int(id_destino) - 1) % 3 + 1
-        file_destino = os.path.join(node_data_dir, f"cuentas_part{part_destino_idx}.txt")
-
-        if file_origen != file_destino:
-            return "ERROR|TRANSFERIR_CUENTA solo soporta transferencias en la misma partición"
-        
-        return handle_atomic_transfer(params, node_data_dir, file_origen)
-
-    elif query_type == "DEBIT":
-        if len(params) < 2: return "ERROR|Parámetros incorrectos para DEBIT"
-        id_cuenta, monto_str = params[0], params[1]
-        description = params[2] if len(params) > 2 else "DEBIT"
-        monto = Decimal(monto_str)
-        part_index = (int(id_cuenta) - 1) % 3 + 1
-        file_path = os.path.join(node_data_dir, f"cuentas_part{part_index}.txt")
-
-        with FILE_LOCK:
+    try:
+        if query_type == "CONSULTAR_CUENTA":
+            if len(params) != 1: return "ERROR|Parámetros incorrectos"
+            id_cuenta = params[0]
+            part_index = (int(id_cuenta) - 1) % 3 + 1
+            file_path = os.path.join(node_data_dir, f"cuentas_part{part_index}.txt")
             lines, err = read_all_lines(file_path)
             if err: return f"ERROR|{err}"
-            idx, linea, err = find_line_and_index(lines, id_cuenta)
-            if err: return f"ERROR|Cuenta {id_cuenta} no encontrada"
-
-            campos = linea.split(',')
-            saldo = Decimal(campos[2])
-            if saldo < monto:
-                return "ERROR|Fondos insuficientes"
-            
-            nuevo_saldo = saldo - monto
-            campos[2] = str(nuevo_saldo)
-            lines[idx] = ",".join(campos) + '\n'
-            write_all_lines(file_path, lines)
-            log_history(id_cuenta, description, f"M:{monto}", node_data_dir, new_balance=nuevo_saldo)
-        
-        return f"SUCCESS|Débito de {monto} completado"
-
-    elif query_type == "CREDIT":
-        if len(params) < 2: return "ERROR|Parámetros incorrectos para CREDIT"
-        id_cuenta, monto_str = params[0], params[1]
-        description = params[2] if len(params) > 2 else "CREDIT"
-        monto = Decimal(monto_str)
-        part_index = (int(id_cuenta) - 1) % 3 + 1
-        file_path = os.path.join(node_data_dir, f"cuentas_part{part_index}.txt")
-
-        with FILE_LOCK:
-            lines, err = read_all_lines(file_path)
+            _, linea, err = find_line_and_index(lines, id_cuenta)
             if err: return f"ERROR|{err}"
-            idx, linea, err = find_line_and_index(lines, id_cuenta)
-            if err: return f"ERROR|Cuenta {id_cuenta} no encontrada"
-
             campos = linea.split(',')
-            saldo = Decimal(campos[2])
-            nuevo_saldo = saldo + monto
-            campos[2] = str(nuevo_saldo)
-            lines[idx] = ",".join(campos) + '\n'
-            write_all_lines(file_path, lines)
-            log_history(id_cuenta, description, f"M:{monto}", node_data_dir, new_balance=nuevo_saldo)
+            log_history(id_cuenta, query_type, "", Decimal(campos[2]), node_data_dir)
+            datos_cuenta = ",".join([campos[0], campos[1], campos[2], campos[3]])
+            return f"SUCCESS|TABLE_DATA|ID Cuenta,ID Cliente,Saldo,Fecha Apertura|{datos_cuenta}"
 
-        return f"SUCCESS|Crédito de {monto} completado"
+        elif query_type == "TRANSFERIR_CUENTA":
+            if len(params) != 3: return "ERROR|Parámetros incorrectos"
+            id_origen, id_destino, _ = params
+            if id_origen == id_destino: return "ERROR|Cuentas de origen y destino no pueden ser la misma."
+            part_origen_idx = (int(id_origen) - 1) % 3 + 1
+            file_origen = os.path.join(node_data_dir, f"cuentas_part{part_origen_idx}.txt")
+            part_destino_idx = (int(id_destino) - 1) % 3 + 1
+            file_destino = os.path.join(node_data_dir, f"cuentas_part{part_destino_idx}.txt")
+            if file_origen != file_destino: return "ERROR|TRANSFERIR_CUENTA solo soporta transferencias en la misma partición"
+            return handle_atomic_transfer(params, node_data_dir, file_origen)
 
-    elif query_type == "PAGAR_DEUDA":
-        if len(params) != 3: return "ERROR|Parámetros incorrectos para PAGAR_DEUDA (se espera ID_CUENTA, ID_PRESTAMO y MONTO)"
-        id_cuenta, id_prestamo, monto_pago_str = params
-        monto_pago = Decimal(monto_pago_str)
-        id_cliente_str = f"cliente_{id_cuenta}"
+        elif query_type == "DEBIT":
+            if len(params) < 2: return "ERROR|Parámetros incorrectos para DEBIT"
+            id_cuenta, monto_str = params[0], params[1]
+            description = params[2] if len(params) > 2 else "DEBIT"
+            monto = Decimal(monto_str)
+            with FILE_LOCK:
+                part_index = (int(id_cuenta) - 1) % 3 + 1
+                file_path = os.path.join(node_data_dir, f"cuentas_part{part_index}.txt")
+                lines, err = read_all_lines(file_path)
+                if err: return f"ERROR|{err}"
+                idx, linea, err = find_line_and_index(lines, id_cuenta)
+                if err: return f"ERROR|Cuenta {id_cuenta} no encontrada"
+                campos = linea.split(',')
+                saldo = Decimal(campos[2])
+                if saldo < monto: 
+                    log_history(id_cuenta, description, f"M:{monto}", saldo, node_data_dir)
+                    return "ERROR|Fondos insuficientes"
+                nuevo_saldo = saldo - monto
+                campos[2] = str(nuevo_saldo)
+                lines[idx] = ",".join(campos) + '\n'
+                write_all_lines(file_path, lines)
+                log_history(id_cuenta, description, f"M:{monto}", nuevo_saldo, node_data_dir)
+                return f"SUCCESS|Débito de {monto} completado"
 
-        with FILE_LOCK:
-            # 1. Encontrar el préstamo específico del cliente
-            prestamo_encontrado = False
+        elif query_type == "CREDIT":
+            if len(params) < 2: return "ERROR|Parámetros incorrectos para CREDIT"
+            id_cuenta, monto_str = params[0], params[1]
+            description = params[2] if len(params) > 2 else "CREDIT"
+            monto = Decimal(monto_str)
+            with FILE_LOCK:
+                part_index = (int(id_cuenta) - 1) % 3 + 1
+                file_path = os.path.join(node_data_dir, f"cuentas_part{part_index}.txt")
+                lines, err = read_all_lines(file_path)
+                if err: return f"ERROR|{err}"
+                idx, linea, err = find_line_and_index(lines, id_cuenta)
+                if err: return f"ERROR|Cuenta {id_cuenta} no encontrada"
+                campos = linea.split(',')
+                saldo_actual = Decimal(campos[2])
+                nuevo_saldo = saldo_actual + monto
+                campos[2] = str(nuevo_saldo)
+                lines[idx] = ",".join(campos) + '\n'
+                write_all_lines(file_path, lines)
+                log_history(id_cuenta, description, f"M:{monto}", nuevo_saldo, node_data_dir)
+                return f"SUCCESS|Crédito de {monto} completado"
+
+        elif query_type == "PAGAR_DEUDA":
+            if len(params) != 3: return "ERROR|Parámetros incorrectos para PAGAR_DEUDA"
+            id_cuenta, id_prestamo, monto_pago_str = params
+            monto_pago = Decimal(monto_pago_str)
+            id_cliente_str = f"cliente_{id_cuenta}"
+            with FILE_LOCK:
+                prestamo_encontrado = False
+                prestamos_file_path, lines_prestamos, idx_prestamo, linea_prestamo = None, None, -1, None
+                for i in range(1, 4):
+                    temp_path = os.path.join(node_data_dir, f"prestamos_part{i}.txt")
+                    if not os.path.exists(temp_path): continue
+                    temp_lines, err = read_all_lines(temp_path)
+                    if err or not temp_lines: continue
+                    for j, linea in enumerate(temp_lines):
+                        campos_prestamo = linea.strip().split(',')
+                        if campos_prestamo[0] == id_prestamo and campos_prestamo[1] == id_cliente_str:
+                            prestamos_file_path, lines_prestamos, idx_prestamo, linea_prestamo = temp_path, temp_lines, j, linea.strip()
+                            prestamo_encontrado = True
+                            break
+                    if prestamo_encontrado: break
+                if not prestamo_encontrado: return "ERROR|El préstamo no existe o no le pertenece."
+                
+                campos_prestamo = linea_prestamo.split(',')
+                deuda_restante = Decimal(campos_prestamo[2]) - Decimal(campos_prestamo[3])
+                fecha_limite = datetime.datetime.strptime(campos_prestamo[5], '%Y-%m-%d').date()
+                
+                if campos_prestamo[4] == 'Cancelado':
+                    return "SUCCESS|Esta deuda ya ha sido cancelada."
+                if fecha_limite < datetime.date(2025, 10, 15):
+                    log_history(id_cuenta, query_type, f"P:{id_prestamo} M:{monto_pago}", get_current_balance(id_cuenta, node_data_dir), node_data_dir)
+                    return "ERROR|Su deuda está vencida. Por favor, contacte al banco para recibir ayuda."
+                if monto_pago > deuda_restante:
+                    log_history(id_cuenta, query_type, f"P:{id_prestamo} M:{monto_pago}", get_current_balance(id_cuenta, node_data_dir), node_data_dir)
+                    return f"ERROR|El monto {monto_pago} es mayor a su deuda de {deuda_restante}"
+                
+                saldo_cuenta = get_current_balance(id_cuenta, node_data_dir)
+                if saldo_cuenta is None or saldo_cuenta < monto_pago: 
+                    log_history(id_cuenta, query_type, f"P:{id_prestamo} M:{monto_pago}", saldo_cuenta, node_data_dir)
+                    return "ERROR|Fondos insuficientes"
+                
+                part_cuenta_idx = (int(id_cuenta) - 1) % 3 + 1
+                cuentas_file_path = os.path.join(node_data_dir, f"cuentas_part{part_cuenta_idx}.txt")
+                lines_cuentas, _ = read_all_lines(cuentas_file_path)
+                idx_cuenta, _, _ = find_line_and_index(lines_cuentas, id_cuenta)
+                campos_cuenta = lines_cuentas[idx_cuenta].strip().split(',')
+                nuevo_saldo_cuenta = saldo_cuenta - monto_pago
+                campos_cuenta[2] = str(nuevo_saldo_cuenta)
+                lines_cuentas[idx_cuenta] = ",".join(campos_cuenta) + '\n'
+                
+                nuevo_monto_pagado = Decimal(campos_prestamo[3]) + monto_pago
+                campos_prestamo[3] = str(nuevo_monto_pagado)
+                
+                if nuevo_monto_pagado >= Decimal(campos_prestamo[2]):
+                    campos_prestamo[4] = 'Cancelado'
+                    response = f"SUCCESS|Deuda del préstamo {id_prestamo} saldada."
+                else:
+                    response = f"SUCCESS|Pago recibido. Su nueva deuda para el préstamo {id_prestamo} es {deuda_restante - monto_pago}"
+                
+                lines_prestamos[idx_prestamo] = ",".join(campos_prestamo) + '\n'
+                write_all_lines(cuentas_file_path, lines_cuentas)
+                write_all_lines(prestamos_file_path, lines_prestamos)
+                log_history(id_cuenta, query_type, f"P:{id_prestamo} M:{monto_pago}", nuevo_saldo_cuenta, node_data_dir)
+                return response
+
+        elif query_type == "CONSULTAR_HISTORIAL":
+            if len(params) != 1: return "ERROR|Parámetros incorrectos"
+            id_cuenta = params[0]
+            historial = []
             for i in range(1, 4):
-                prestamos_file_path = os.path.join(node_data_dir, f"prestamos_part{i}.txt")
-                if not os.path.exists(prestamos_file_path): continue
+                file_path = os.path.join(node_data_dir, f"historial_part{i}.txt")
+                if not os.path.exists(file_path): continue
+                lines, err = read_all_lines(file_path)
+                if err or not lines: continue
+                for line in lines:
+                    try:
+                        if line.strip().split('|')[1] == id_cuenta:
+                            historial.append(line.strip().replace('|', ','))
+                    except IndexError:
+                        continue # Ignorar líneas malformadas en el historial
+            if not historial: return "SUCCESS|No hay historial para esta cuenta."
+            headers = "Fecha,ID Cuenta,Operación,Detalles,Saldo en ese Instante"
+            table_rows = sorted(historial, key=lambda x: x.split(',')[0], reverse=True)
+            return f"SUCCESS|TABLE_DATA|{headers}|{'|'.join(table_rows)}"
 
-                lines_prestamos, err = read_all_lines(prestamos_file_path)
-                if err or not lines_prestamos: continue
-
-                for j, linea in enumerate(lines_prestamos):
-                    campos_prestamo = linea.strip().split(',')
-                    # Validar que el préstamo exista, pertenezca al cliente y esté activo
-                    if campos_prestamo[0] == id_prestamo and campos_prestamo[1] == id_cliente_str and campos_prestamo[4] == 'Activo':
-                        prestamo_encontrado = True
-                        idx_prestamo, linea_prestamo = j, linea.strip()
-                        break
-                if prestamo_encontrado: break
-            
-            if not prestamo_encontrado:
-                return "ERROR|El préstamo no existe, no le pertenece o ya fue cancelado."
-
-            # 2. Validar monto del pago
-            campos_prestamo = linea_prestamo.split(',')
-            monto_total_deuda = Decimal(campos_prestamo[2])
-            monto_ya_pagado = Decimal(campos_prestamo[3])
-            deuda_restante = monto_total_deuda - monto_ya_pagado
-
-            if monto_pago > deuda_restante:
-                return f"ERROR|El monto {monto_pago} es mayor a su deuda de {deuda_restante}"
-
-            # 3. Validar y obtener saldo de la cuenta
-            part_cuenta_idx = (int(id_cuenta) - 1) % 3 + 1
-            cuentas_file_path = os.path.join(node_data_dir, f"cuentas_part{part_cuenta_idx}.txt")
-            lines_cuentas, err = read_all_lines(cuentas_file_path)
-            if err: return f"ERROR|{err}"
-            idx_cuenta, linea_cuenta, err = find_line_and_index(lines_cuentas, id_cuenta)
-            if err: return f"ERROR|No se encontró la cuenta {id_cuenta}"
-
-            campos_cuenta = linea_cuenta.split(',')
-            saldo_cuenta = Decimal(campos_cuenta[2])
-
-            if saldo_cuenta < monto_pago:
-                return "ERROR|Fondos insuficientes para realizar el pago."
-
-            # 4. Actualizar ambos registros
-            nuevo_saldo_cuenta = saldo_cuenta - monto_pago
-            campos_cuenta[2] = str(nuevo_saldo_cuenta)
-            lines_cuentas[idx_cuenta] = ",".join(campos_cuenta) + '\n'
-
-            nuevo_monto_pagado = monto_ya_pagado + monto_pago
-            campos_prestamo[3] = str(nuevo_monto_pagado)
-            
-            if nuevo_monto_pagado >= monto_total_deuda:
-                campos_prestamo[4] = 'Cancelado'
-                mensaje_final = f"Deuda del préstamo {id_prestamo} saldada. Usted ya no tiene esta deuda."
+        elif query_type == "ESTADO_PAGO_PRESTAMO":
+            if len(params) != 1: return "ERROR|Parámetros incorrectos"
+            id_cuenta = params[0]
+            id_cliente_str = f"cliente_{id_cuenta}"
+            resultados = []
+            today = datetime.date(2025, 10, 15)
+            for i in range(1, 4):
+                file_path = os.path.join(node_data_dir, f"prestamos_part{i}.txt")
+                if not os.path.exists(file_path): continue
+                lines, err = read_all_lines(file_path)
+                if err or not lines: continue
+                for line in lines:
+                    try:
+                        campos = line.strip().split(',')
+                        if campos[1] == id_cliente_str:
+                            monto_total = Decimal(campos[2])
+                            monto_pagado = Decimal(campos[3])
+                            monto_pendiente = monto_total - monto_pagado
+                            if monto_pendiente <= 0: estado_actual = "Cancelado"
+                            elif datetime.datetime.strptime(campos[5], '%Y-%m-%d').date() < today: estado_actual = "Vencido"
+                            else: estado_actual = "Activo"
+                            linea_formateada = f"{campos[0]},{monto_total},{monto_pagado},{monto_pendiente},{estado_actual}"
+                            resultados.append(linea_formateada)
+                    except (IndexError, ValueError): continue
+            if not resultados: 
+                response = "SUCCESS|Usted no tiene préstamos."
             else:
-                nueva_deuda = monto_total_deuda - nuevo_monto_pagado
-                mensaje_final = f"Pago recibido. Su nueva deuda para el préstamo {id_prestamo} es {nueva_deuda}"
+                headers = "ID Préstamo,Monto Total,Monto Pagado,Monto Pendiente,Estado Actual"
+                response = f"SUCCESS|TABLE_DATA|{headers}|{'|'.join(resultados)}"
+            log_history(id_cuenta, query_type, "", get_current_balance(id_cuenta, node_data_dir), node_data_dir)
+            return response
 
-            lines_prestamos[idx_prestamo] = ",".join(campos_prestamo) + '\n'
+        elif query_type == "ARQUEO_CUENTAS":
+            total_sum = Decimal('0.0')
+            for i in range(1, 4):
+                file_path = os.path.join(node_data_dir, f"cuentas_part{i}.txt")
+                if not os.path.exists(file_path): continue
+                lines, err = read_all_lines(file_path)
+                if err or not lines: continue
+                for line in lines:
+                    try: total_sum += Decimal(line.strip().split(',')[2])
+                    except (IndexError, ValueError): continue
+            return f"SUCCESS|{total_sum}"
 
-            # 5. Escribir cambios y log
-            write_all_lines(cuentas_file_path, lines_cuentas)
-            write_all_lines(prestamos_file_path, lines_prestamos)
-            log_history(id_cuenta, "PAGAR_DEUDA", f"P:{id_prestamo} M:{monto_pago}", node_data_dir, new_balance=nuevo_saldo_cuenta)
+        else:
+            return f"ERROR|Query '{query_type}' no soportada"
 
-        return f"SUCCESS|{mensaje_final}"
+    except Exception as e:
+        logging.error(f"Error inesperado procesando query '{query_type}': {e}")
+        return f"ERROR|Error interno del worker: {e}"
 
-    elif query_type == "CONSULTAR_HISTORIAL":
-        if len(params) != 1: return "ERROR|Parámetros incorrectos"
-        id_cuenta = params[0]
-        logging.info(f"Consultando historial para la cuenta {id_cuenta}")
-
-        historial = []
-        for i in range(1, 4):
-            file_path = os.path.join(node_data_dir, f"historial_part{i}.txt")
-            if not os.path.exists(file_path): continue
-            
-            lines, err = read_all_lines(file_path)
-            if err or not lines: continue
-
-            for line in lines:
-                try:
-                    campos = line.strip().split(',')
-                    if campos[0] == id_cuenta:
-                        historial.append(line.strip())
-                except IndexError:
-                    continue
-        
-        if not historial:
-            return "SUCCESS|No hay historial para esta cuenta."
-        
-        table_rows = []
-        for line in sorted(historial, key=lambda x: x.split(',')[3], reverse=True):
-            campos = line.strip().split(',')
-            id_cliente_hist, command, details, fecha, saldo_despues = campos
-            mensaje = f"{command} ({details})"
-            table_rows.append(f"{id_cliente_hist},{mensaje},{fecha},{saldo_despues}")
-        
-        return f"SUCCESS|TABLE_DATA|ID Cliente,Operación,Fecha,Saldo Resultante|{'|'.join(table_rows)}"
-
-    elif query_type == "ARQUEO_CUENTAS":
-        primary_partition_index = args.node_id
-        file_path = os.path.join(node_data_dir, f"cuentas_part{primary_partition_index}.txt")
-        logging.info(f"Iniciando arqueo para la partición primaria {primary_partition_index} en {file_path}")
-
-        lines, err = read_all_lines(file_path)
-        if err: logging.error(err); return f"ERROR|{err}"
-
-        total_sum = Decimal('0.0')
-        for line in lines:
-            try:
-                saldo = Decimal(line.strip().split(',')[2])
-                total_sum += saldo
-            except (IndexError, ValueError):
-                continue
-        
-        logging.info(f"Suma parcial para la partición {primary_partition_index}: {total_sum}")
-        return f"SUCCESS|{total_sum}"
-
-    elif query_type == "ESTADO_PAGO_PRESTAMO":
-        if len(params) != 1: return "ERROR|Parámetros incorrectos"
-        id_cuenta = params[0]
-        id_cliente_str = f"cliente_{id_cuenta}"
-        logging.info(f"Buscando préstamos para el cliente {id_cliente_str}")
-        
-        log_history(id_cuenta, "ESTADO_PAGO_PRESTAMO", "", node_data_dir)
-
-        resultados = []
-        for i in range(1, 4):
-            file_path = os.path.join(node_data_dir, f"prestamos_part{i}.txt")
-            if not os.path.exists(file_path): continue
-            
-            lines, err = read_all_lines(file_path)
-            if err or not lines: continue
-
-            for line in lines:
-                try:
-                    campos = line.strip().split(',')
-                    if campos[1] == id_cliente_str:
-                        id_prestamo = campos[0]
-                        estado = campos[4]
-                        monto_total = Decimal(campos[2])
-                        monto_pagado = Decimal(campos[3])
-                        deuda_restante = monto_total - monto_pagado
-                        # Formatear la línea para la nueva tabla simplificada
-                        linea_simplificada = f"{id_prestamo},{estado},{deuda_restante}"
-                        resultados.append(linea_simplificada)
-                except IndexError:
-                    continue
-        
-        if not resultados:
-            return "SUCCESS|Usted no tiene préstamos activos."
-        
-        logging.info(f"Se encontraron {len(resultados)} préstamos para {id_cliente_str}")
-        headers = "ID Préstamo,Estado,Deuda Restante"
-        return f"SUCCESS|TABLE_DATA|{headers}|{'|'.join(resultados)}"
-    else:
-        return f"ERROR|Query '{query_type}' no soportada"
+    # Logueo Centralizado
+    if history_account_id and query_type != "CONSULTAR_HISTORIAL":
+        log_history(history_account_id, query_type, details_for_log, response, node_data_dir)
+    
+    return response
 
 # --- Servidor TCP Concurrente ---
 
