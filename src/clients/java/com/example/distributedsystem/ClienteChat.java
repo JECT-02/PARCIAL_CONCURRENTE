@@ -72,6 +72,29 @@ public class ClienteChat extends JFrame {
         bottomPanel.add(sendButton, BorderLayout.EAST);
         add(bottomPanel, BorderLayout.SOUTH);
 
+        // --- Panel de Ayuda ---
+        JTextArea helpArea = new JTextArea();
+        helpArea.setEditable(false);
+        helpArea.setBackground(new Color(240, 240, 240));
+        helpArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
+        helpArea.setMargin(new Insets(5, 5, 5, 5));
+        helpArea.setText(
+            "--- Comandos Disponibles ---\n\n" +
+            "CONSULTAR_CUENTA\n" +
+            "    Muestra el saldo y datos de tu cuenta.\n\n" +
+            "ESTADO_PAGO_PRESTAMO\n" +
+            "    Muestra tus préstamos activos.\n\n" +
+            "CONSULTAR_HISTORIAL\n" +
+            "    Muestra tu historial de operaciones.\n\n" +
+            "TRANSFERIR_CUENTA <destino> <monto>\n" +
+            "    Transfiere un monto a otra cuenta.\n\n" +
+            "PAGAR_DEUDA <id_prestamo> <monto>\n" +
+            "    Paga un monto a un préstamo específico.\n"
+        );
+        JScrollPane helpScrollPane = new JScrollPane(helpArea);
+        helpScrollPane.setPreferredSize(new Dimension(250, 0));
+        add(helpScrollPane, BorderLayout.EAST);
+
         // --- Action Listeners ---
         sendButton.addActionListener(new SendButtonListener());
         textField.addActionListener(new SendButtonListener());
@@ -115,6 +138,12 @@ public class ClienteChat extends JFrame {
             } else if (command.equalsIgnoreCase("ESTADO_PAGO_PRESTAMO") && parts.length == 1) {
                 // Usuario escribe: ESTADO_PAGO_PRESTAMO
                 finalCommandPayload = String.format("ESTADO_PAGO_PRESTAMO|%s", clientId);
+            } else if (command.equalsIgnoreCase("CONSULTAR_HISTORIAL") && parts.length == 1) {
+                // Usuario escribe: CONSULTAR_HISTORIAL
+                finalCommandPayload = String.format("CONSULTAR_HISTORIAL|%s", clientId);
+            } else if (command.equalsIgnoreCase("PAGAR_DEUDA") && parts.length == 3) {
+                // Usuario escribe: PAGAR_DEUDA <id_prestamo> <monto>
+                finalCommandPayload = String.format("PAGAR_DEUDA|%s|%s", parts[1], parts[2]);
             } else {
                 // Para todos los demás comandos, usar la lógica general
                 finalCommandPayload = text.replace(" ", "|");
