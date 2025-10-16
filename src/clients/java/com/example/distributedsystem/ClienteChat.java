@@ -143,10 +143,11 @@ public class ClienteChat extends JFrame {
                 finalCommandPayload = String.format("CONSULTAR_HISTORIAL|%s", clientId);
             } else if (command.equalsIgnoreCase("PAGAR_DEUDA") && parts.length == 3) {
                 // Usuario escribe: PAGAR_DEUDA <id_prestamo> <monto>
-                finalCommandPayload = String.format("PAGAR_DEUDA|%s|%s", parts[1], parts[2]);
+                finalCommandPayload = String.format("PAGAR_DEUDA|%s|%s|%s", clientId, parts[1], parts[2]);
             } else {
-                // Para todos los demás comandos, usar la lógica general
-                finalCommandPayload = text.replace(" ", "|");
+                messageArea.append("ERROR: Comando o formato incorrecto. Consulta el panel de ayuda.\n");
+                textField.setText("");
+                return;
             }
 
             String request = String.format("QUERY|%s|%s", clientId, finalCommandPayload);
