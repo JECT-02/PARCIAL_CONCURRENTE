@@ -303,9 +303,18 @@ def handle_query(query_parts, node_data_dir):
                             monto_pendiente = monto_total - monto_pagado
                             if monto_pendiente <= 0: estado_actual = "Cancelado"
                             elif datetime.datetime.strptime(campos[5], '%Y-%m-%d').date() < today: estado_actual = "Vencido"
-                            else: estado_actual = "Activo"
-                            linea_formateada = f"{campos[0]},{monto_total},{monto_pagado},{monto_pendiente},{estado_actual}"
-                            resultados.append(linea_formateada)
+                            estado_actual = "Activo"
+                        
+                        linea_formateada = f"{campos[0]},{monto_total},{monto_pagado},{monto_pendiente},{estado_actual},{fecha_limite_str}"
+                        resultados.append(linea_formateada)
+                except (IndexError, ValueError) as e:
+                    logging.warning(f"Error procesando línea de préstamo: {line} -> {e}")
+                    continue
+        
+        if not resultados: return "SUCCESS|Usted no tiene préstamos."
+        
+        headers = "ID Préstamo,Monto Total,Monto Pagado,Monto Pendiente,Estado Actual,Fecha Límite"
+        return f"SUCCESS|TABLE_DATA|{headers}|{'|'.join(resultados)}" 
                     except (IndexError, ValueError): continue
             if not resultados: 
                 response = "SUCCESS|Usted no tiene préstamos."
